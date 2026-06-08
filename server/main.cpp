@@ -40,7 +40,7 @@ int main()
         return EXIT_FAILURE;
     }
 
-    result  = listen(serverSocket, SOMAXCONN);
+    result = listen(serverSocket, SOMAXCONN);
 
     if (result == SOCKET_ERROR) {
         std::cerr << "Listen failed" << std::endl;
