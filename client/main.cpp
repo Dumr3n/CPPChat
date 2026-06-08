@@ -2,6 +2,7 @@
 #include <ws2tcpip.h>
 
 #include <iostream>
+#include <string>
 
 int main()
 {
@@ -44,10 +45,29 @@ int main()
         return EXIT_FAILURE;
     }
 
-    std::cout << "Connect to server" << std::endl;
-    std::cout << "Press Enter to stop client..." << std::endl;
+    std::cout << "Connect to server. Type your message:" << std::endl;
+    
+    std::string msg;
+    while(true) {
+        std::cout << "\n> ";
 
-    std::cin.get();
+        std::getline(std::cin, msg);
+        
+        if (msg == "/quit")
+            break;
+        
+        msg += '\n';
+
+        result = send(clientSocket, msg.c_str(), (int)msg.size(), 0);
+
+        if (result == SOCKET_ERROR) {
+            std::cerr << "Send failed" << std::endl;
+        } else {
+            std::cout << "Sent " << result << " bytes" << std::endl;
+        }
+
+    }
+    
 
     closesocket(clientSocket);
     WSACleanup();

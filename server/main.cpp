@@ -62,6 +62,26 @@ int main()
 
     std::cout << "Client connected" << std::endl;
 
+    char buffer[1024];
+
+    while (true) {
+        int bytesReceived = recv(
+            clientSocket,
+            buffer,
+            sizeof(buffer) - 1,
+            0
+        );
+
+        if (bytesReceived > 0) {
+            buffer[bytesReceived] = '\0';
+            std::cout << "Received: " << buffer; 
+        } else {
+            std::cout << "Client disconnected without sending data" << std::endl;
+            break;
+        }
+    }
+
+
     closesocket(clientSocket);
     closesocket(serverSocket);
     WSACleanup();
