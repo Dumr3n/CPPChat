@@ -26,7 +26,21 @@ int main()
         return EXIT_FAILURE;
     }
 
-    std::cout << "Server socket created successfully" << std::endl;
+    sockaddr_in serverAddress{};
+    serverAddress.sin_family = AF_INET;
+    serverAddress.sin_addr.s_addr = inet_addr("127.0.0.1");
+    serverAddress.sin_port = htons(54000);
+
+    result = bind(serverSocket, reinterpret_cast<sockaddr*>(&serverAddress), sizeof(serverAddress));
+
+    if (result == SOCKET_ERROR) {
+        std::cerr << "Bind failed" << std::endl;
+        closesocket(serverSocket);
+        WSACleanup();
+        return EXIT_FAILURE;
+    }
+
+    std::cout << "Server bound to port 54000" << std::endl;
 
     closesocket(serverSocket);
     WSACleanup();
