@@ -50,10 +50,19 @@ int main()
     }
 
     std::cout << "Server is listening on port 54000" << std::endl;
-    std::cout << "Press Enter to stop server..." << std::endl;
+    
+    SOCKET clientSocket = accept(serverSocket, nullptr, nullptr);
 
-    std::cin.get();
+    if (clientSocket == INVALID_SOCKET) {
+        std::cerr << "Accept failed" << std::endl;
+        closesocket(serverSocket);
+        WSACleanup();
+        return EXIT_FAILURE;
+    }
 
+    std::cout << "Client connected" << std::endl;
+
+    closesocket(clientSocket);
     closesocket(serverSocket);
     WSACleanup();
     
