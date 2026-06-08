@@ -40,7 +40,19 @@ int main()
         return EXIT_FAILURE;
     }
 
-    std::cout << "Server bound to port 54000" << std::endl;
+    result  = listen(serverSocket, SOMAXCONN);
+
+    if (result == SOCKET_ERROR) {
+        std::cerr << "Listen failed" << std::endl;
+        closesocket(serverSocket);
+        WSACleanup();
+        return EXIT_FAILURE;
+    }
+
+    std::cout << "Server is listening on port 54000" << std::endl;
+    std::cout << "Press Enter to stop server..." << std::endl;
+
+    std::cin.get();
 
     closesocket(serverSocket);
     WSACleanup();
