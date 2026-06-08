@@ -19,3 +19,11 @@ add_executable(client
 
 target_link_libraries(server PRIVATE ws2_32)
 target_link_libraries(client PRIVATE ws2_32)
+
+set_target_properties(client PROPERTIES
+    RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}"
+)
+
+set_target_properties(server PROPERTIES
+    RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}"
+)
