@@ -7,6 +7,30 @@
 #include <mutex>
 #include <string>
 
+void handleClient(SOCKET clientSocket)
+{
+    char buffer[1024];
+
+    while (true) {
+        int bytesReceived = recv(
+            clientSocket,
+            buffer,
+            sizeof(buffer) - 1,
+            0
+        );
+
+        if (bytesReceived > 0) {
+            buffer[bytesReceived] = '\0';
+            std::cout << "Received: " << buffer; 
+        } else {
+            std::cout << "Client disconnected without sending data" << std::endl;
+            break;
+        }
+    }
+
+    closesocket(clientSocket);
+}
+
 int main()
 {
     WSADATA wsaData{};
@@ -50,39 +74,22 @@ int main()
     }
 
     std::cout << "Server is listening on port 54000" << std::endl;
-    
-    SOCKET clientSocket = accept(serverSocket, nullptr, nullptr);
-
-    if (clientSocket == INVALID_SOCKET) {
-        std::cerr << "Accept failed" << std::endl;
-        closesocket(serverSocket);
-        WSACleanup();
-        return EXIT_FAILURE;
-    }
-
-    std::cout << "Client connected" << std::endl;
-
-    char buffer[1024];
 
     while (true) {
-        int bytesReceived = recv(
-            clientSocket,
-            buffer,
-            sizeof(buffer) - 1,
-            0
-        );
-
-        if (bytesReceived > 0) {
-            buffer[bytesReceived] = '\0';
-            std::cout << "Received: " << buffer; 
-        } else {
-            std::cout << "Client disconnected without sending data" << std::endl;
-            break;
+        SOCKET clientSocket = accept(serverSocket, nullptr, nullptr);
+        if (clientSocket == INVALID_SOCKET) {
+            std::cerr << "Accept failed" << std::endl;
+            closesocket(serverSocket);
+            WSACleanup();
+            return EXIT_FAILURE;
         }
+
+        std::cout << "Client connected" << std::endl;
+
+        std::thread clientThread(handleClient, clientSocket);
+        clientThread.detach();
     }
 
-
-    closesocket(clientSocket);
     closesocket(serverSocket);
     WSACleanup();
     
