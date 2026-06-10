@@ -7,8 +7,62 @@
 #include <mutex>
 #include <string>
 
+std::vector<std::pair<std::string, SOCKET>> clients;
+std::mutex clientMutex;
+
+void broadcastMessage(const std::string& msg, SOCKET senderSocket)
+{
+    std::lock_guard<std::mutex> lock(clientMutex);
+    for ( auto [username, clientSocket] : clients) {
+        
+        if (clientSocket == senderSocket)
+            continue;
+        
+        send(clientSocket, msg.c_str(), (int)msg.size(), 0);
+    }
+}
+
+std::string receiveMessage(SOCKET clientSocket)
+{
+    char buffer[1024];
+    int bytesReceived = recv(
+        clientSocket,
+        buffer,
+        sizeof(buffer) - 1,
+        0
+    );
+
+    if (bytesReceived <= 0)
+        return {};
+    buffer[bytesReceived] = '\0';
+
+    std::string msg = buffer;
+
+    if (!msg.empty() && msg.back() == '\n')
+        msg.pop_back();
+    
+    return msg;
+}
+
 void handleClient(SOCKET clientSocket)
 {
+
+    std::string username = receiveMessage(clientSocket);
+    
+    if (username.empty()) {
+        std::cout << "Client disconnected without sending username" << std::endl;
+        closesocket(clientSocket);
+        return;
+    }
+
+    {
+        std::lock_guard<std::mutex> lock(clientMutex);
+        clients.push_back({username, clientSocket});
+    }
+
+    std::cout << "Username " << username << " connected!" << std::endl;
+    
+
     char buffer[1024];
 
     while (true) {
@@ -19,11 +73,22 @@ void handleClient(SOCKET clientSocket)
             0
         );
 
+        
         if (bytesReceived > 0) {
             buffer[bytesReceived] = '\0';
-            std::cout << "Received: " << buffer; 
+            std::cout << "Received from " << username << ": " << buffer;
+            std::string msg = username + ": " + buffer;
+            broadcastMessage(msg, clientSocket);
         } else {
             std::cout << "Client disconnected without sending data" << std::endl;
+            {
+                std::lock_guard<std::mutex> lock(clientMutex);
+                auto client = std::find_if(clients.begin(), clients.end(), [clientSocket](const auto& pair){return pair.second == clientSocket;});
+                if (client != clients.end()) {
+                    std::cout << "Remove " << client->first << std::endl;
+                    clients.erase(client);
+                }
+            }
             break;
         }
     }
@@ -83,8 +148,7 @@ int main()
             WSACleanup();
             return EXIT_FAILURE;
         }
-
-        std::cout << "Client connected" << std::endl;
+        std::cout << "Attempt to connect" << std::endl;
 
         std::thread clientThread(handleClient, clientSocket);
         clientThread.detach();

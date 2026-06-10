@@ -3,6 +3,28 @@
 
 #include <iostream>
 #include <string>
+#include <thread>
+
+void receiveMessage(SOCKET clientSocket)
+{
+    char buffer[1024];
+    while (true) {
+        int bytesReceived = recv(
+            clientSocket,
+            buffer,
+            sizeof(buffer) - 1,
+            0
+        );
+
+        if (bytesReceived <= 0)
+        {
+            std::cout << "Disconnected from server" << std::endl;
+            break;
+        }
+        buffer[bytesReceived] = '\0';
+        std::cout << "\n" << buffer << "> ";
+    }
+}
 
 int main()
 {
@@ -45,7 +67,10 @@ int main()
         return EXIT_FAILURE;
     }
 
-    std::cout << "Connect to server. Type your message:" << std::endl;
+    std::cout << "Connect to server. Type your username: ";
+
+    std::thread receiverThread(receiveMessage, clientSocket);
+    receiverThread.detach();
     
     std::string msg;
     while(true) {
@@ -62,10 +87,7 @@ int main()
 
         if (result == SOCKET_ERROR) {
             std::cerr << "Send failed" << std::endl;
-        } else {
-            std::cout << "Sent " << result << " bytes" << std::endl;
         }
-
     }
     
 
