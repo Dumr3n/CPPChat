@@ -1,98 +1,144 @@
-#include <winsock2.h>
+#include "Protocol.hpp"
+#include "Socket.hpp"
+
 #include <ws2tcpip.h>
 
+#include <atomic>
+#include <chrono>
+#include <ctime>
+#include <cstdlib>
+#include <iomanip>
 #include <iostream>
+#include <mutex>
+#include <sstream>
+#include <stdexcept>
 #include <string>
+#include <string_view>
 #include <thread>
 
-void receiveMessage(SOCKET clientSocket)
-{
-    char buffer[1024];
-    while (true) {
-        int bytesReceived = recv(
-            clientSocket,
-            buffer,
-            sizeof(buffer) - 1,
-            0
-        );
+namespace {
+    std::mutex consoleMutex;
+    std::string timestamp() {
+        const auto now = std::chrono::system_clock::now();
+        const std::time_t value = std::chrono::system_clock::to_time_t(now);
+        std::tm local{};
+        localtime_s(&local, &value);
+        std::ostringstream out;
+        out << std::put_time(&local, "%H:%M");
+        return out.str();
+    }
 
-        if (bytesReceived <= 0)
-        {
-            std::cout << "Disconnected from server" << std::endl;
-            break;
-        }
-        buffer[bytesReceived] = '\0';
-        std::cout << "\n" << buffer << "> ";
+    void printLine(std::string_view text) {
+        std::lock_guard lock(consoleMutex);
+        std::cout << "\r[" << timestamp() << "] " << text << "\n> " << std::flush;
+    }
+
+    void usage() { 
+        std::cout << "Usage: client [--host IPv4] [--port 1-65535] [--name USERNAME]\n"; 
     }
 }
 
-int main()
+int main(int argc, char* argv[])
 {
-    WSADATA wsaData{};
-
-    int result = WSAStartup(MAKEWORD(2, 2), &wsaData);
-
-    if (result != 0) {
-        std::cerr << "WSAStartup failed" << std::endl;
-        return EXIT_FAILURE;
-    }
-
-    SOCKET clientSocket = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
-
-    if (clientSocket == INVALID_SOCKET) {
-        std::cerr << "Failed to create client socket" << std::endl;
-        WSACleanup();
-        return EXIT_FAILURE;
-    }
-
-    sockaddr_in serverAddress{};
-    serverAddress.sin_family = AF_INET;
-    serverAddress.sin_port = htons(54000);
-
-    result = inet_pton(AF_INET, "127.0.0.1", &serverAddress.sin_addr);
-
-    if (result != 1) {
-        std::cerr << "Invalid server IP address" << std::endl;
-        closesocket(clientSocket);
-        WSACleanup();
-        return EXIT_FAILURE;
-    }
-
-    result = connect(clientSocket, reinterpret_cast<sockaddr*>(&serverAddress), sizeof(serverAddress));
-
-    if (result == SOCKET_ERROR) {
-        std::cerr << "Failed to connect to server" << std::endl;
-        closesocket(clientSocket);
-        WSACleanup();
-        return EXIT_FAILURE;
-    }
-
-    std::cout << "Connect to server. Type your username: ";
-
-    std::thread receiverThread(receiveMessage, clientSocket);
-    receiverThread.detach();
-    
-    std::string msg;
-    while(true) {
-        std::cout << "\n> ";
-
-        std::getline(std::cin, msg);
-        
-        if (msg == "/quit")
-            break;
-        
-        msg += '\n';
-
-        result = send(clientSocket, msg.c_str(), (int)msg.size(), 0);
-
-        if (result == SOCKET_ERROR) {
-            std::cerr << "Send failed" << std::endl;
+    std::string host = "127.0.0.1";
+    std::string username;
+    std::uint16_t port = chat::defaultPort;
+    try {
+        for (int i = 1; i < argc; ++i) {
+            const std::string_view option = argv[i];
+            if (option == "--host" && i + 1 < argc) {
+                host = argv[++i];
+            } else if (option == "--name" && i + 1 < argc) {
+                username = argv[++i];
+            } else if (option == "--port" && i + 1 < argc) {
+                const int value = std::stoi(argv[++i]);
+                if (value < 1024 || value > 65535) {
+                    throw std::invalid_argument("Port must be between 1024 and 65535");
+                }
+                port = static_cast<std::uint16_t>(value);
+            } else if (option == "--help") { 
+                usage(); 
+                return EXIT_SUCCESS; 
+            }
+            else { 
+                usage(); 
+                return EXIT_FAILURE; 
+            }
         }
-    }
-    
+        if (username.empty()) {
+            std::cout << "Username: ";
+            std::getline(std::cin, username);
+        }
 
-    closesocket(clientSocket);
-    WSACleanup();
-    
-    return 0;
+        WinsockSession winsock;
+        Socket socketHandle(socket(AF_INET, SOCK_STREAM, IPPROTO_TCP));
+        if (!socketHandle.valid()) {
+            throw std::runtime_error(chat::socketError("socket"));
+        }
+        sockaddr_in address{};
+        address.sin_family = AF_INET;
+        address.sin_port = htons(port);
+        
+        if (
+            inet_pton(AF_INET, host.c_str(), &address.sin_addr) != 1
+        ) {
+            throw std::runtime_error("Invalid server address: " + host);
+        }
+        
+        if (
+            connect(socketHandle.get(), reinterpret_cast<sockaddr*>(&address), sizeof(address)) == SOCKET_ERROR
+        ) {
+            throw std::runtime_error(chat::socketError("connect"));
+        }
+
+        if (
+            !chat::sendPacket(socketHandle.get(), chat::MessageType::hello, username)
+        ) {
+            throw std::runtime_error(chat::socketError("send"));
+        }
+
+        std::atomic_bool connected = true;
+        std::jthread receiver([&] {
+            chat::Packet packet;
+            while (connected) {
+                const auto result = chat::receivePacket(socketHandle.get(), packet);
+                if (result != chat::ReceiveResult::success) {
+                    break;
+                }
+                const std::string prefix = packet.type == chat::MessageType::error ? "Error: " : "";
+                printLine(prefix + packet.payload);
+                if (packet.type == chat::MessageType::error && packet.payload.find("Username") != std::string::npos)
+                    break;
+            }
+            connected = false;
+        });
+
+        { 
+            std::lock_guard lock(consoleMutex); 
+            std::cout << "Connected to " << host << ':' << port << "\n> " << std::flush; 
+        }
+        std::string line;
+        while (connected && std::getline(std::cin, line)) {
+            if (line == "/quit") {
+                break;
+            }
+            if (line.empty()) { 
+                std::cout << "> " << std::flush; 
+                continue; 
+            }
+            const auto type = line.front() == '/' ? chat::MessageType::command : chat::MessageType::chat;
+            if (!chat::sendPacket(socketHandle.get(), type, line)) { 
+                printLine("Send failed."); 
+                break; 
+            }
+            std::lock_guard lock(consoleMutex);
+            std::cout << "> " << std::flush;
+        }
+        connected = false;
+        socketHandle.shutdownBoth();
+    } catch (const std::exception& error) {
+        std::cerr << "Fatal error: " << error.what() << '\n';
+        return EXIT_FAILURE;
+    }
+    return EXIT_SUCCESS;
 }

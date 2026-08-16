@@ -1,162 +1,67 @@
-#include <winsock2.h>
-#include <ws2tcpip.h>
+#include "ChatServer.hpp"
+#include "Protocol.hpp"
+#include "Socket.hpp"
 
+#include <windows.h>
+
+#include <atomic>
+#include <chrono>
+#include <cstdlib>
 #include <iostream>
-#include <vector>
-#include <thread>
-#include <mutex>
 #include <string>
+#include <thread>
 
-std::vector<std::pair<std::string, SOCKET>> clients;
-std::mutex clientMutex;
-
-void broadcastMessage(const std::string& msg, SOCKET senderSocket)
-{
-    std::lock_guard<std::mutex> lock(clientMutex);
-    for ( auto [username, clientSocket] : clients) {
-        
-        if (clientSocket == senderSocket)
-            continue;
-        
-        send(clientSocket, msg.c_str(), (int)msg.size(), 0);
+namespace {
+    std::atomic_bool interrupted = false;
+    BOOL WINAPI onConsoleSignal(DWORD signal) {
+        if (signal == CTRL_C_EVENT || signal == CTRL_BREAK_EVENT || signal == CTRL_CLOSE_EVENT) {
+            interrupted = true;
+            return TRUE;
+        }
+        return FALSE;
+    }
+    
+    void usage() { 
+        std::cout << "Usage: server [--bind IPv4] [--port 1024-65535]\n"; 
     }
 }
 
-std::string receiveMessage(SOCKET clientSocket)
+int main(int argc, char* argv[])
 {
-    char buffer[1024];
-    int bytesReceived = recv(
-        clientSocket,
-        buffer,
-        sizeof(buffer) - 1,
-        0
-    );
-
-    if (bytesReceived <= 0)
-        return {};
-    buffer[bytesReceived] = '\0';
-
-    std::string msg = buffer;
-
-    if (!msg.empty() && msg.back() == '\n')
-        msg.pop_back();
-    
-    return msg;
-}
-
-void handleClient(SOCKET clientSocket)
-{
-
-    std::string username = receiveMessage(clientSocket);
-    
-    if (username.empty()) {
-        std::cout << "Client disconnected without sending username" << std::endl;
-        closesocket(clientSocket);
-        return;
-    }
-
-    {
-        std::lock_guard<std::mutex> lock(clientMutex);
-        clients.push_back({username, clientSocket});
-    }
-
-    std::cout << "Username " << username << " connected!" << std::endl;
-    
-
-    char buffer[1024];
-
-    while (true) {
-        int bytesReceived = recv(
-            clientSocket,
-            buffer,
-            sizeof(buffer) - 1,
-            0
-        );
-
-        
-        if (bytesReceived > 0) {
-            buffer[bytesReceived] = '\0';
-            std::cout << "Received from " << username << ": " << buffer;
-            std::string msg = username + ": " + buffer;
-            broadcastMessage(msg, clientSocket);
-        } else {
-            std::cout << "Client disconnected without sending data" << std::endl;
-            {
-                std::lock_guard<std::mutex> lock(clientMutex);
-                auto client = std::find_if(clients.begin(), clients.end(), [clientSocket](const auto& pair){return pair.second == clientSocket;});
-                if (client != clients.end()) {
-                    std::cout << "Remove " << client->first << std::endl;
-                    clients.erase(client);
+    std::string address = "127.0.0.1";
+    std::uint16_t port = chat::defaultPort;
+    try {
+        for (int i = 1; i < argc; ++i) {
+            const std::string option = argv[i];
+            if (option == "--bind" && i + 1 < argc) {
+                address = argv[++i];
+            } else if (option == "--port" && i + 1 < argc) {
+                const int value = std::stoi(argv[++i]);
+                if (value < 1024 || value > 65535) {
+                    throw std::invalid_argument("Port must be between 1024 and 65535");
                 }
+                port = static_cast<std::uint16_t>(value);
+            } else if (option == "--help") { 
+                usage(); 
+                return EXIT_SUCCESS; 
+            } else { 
+                usage(); 
+                return EXIT_FAILURE; 
             }
-            break;
         }
-    }
-
-    closesocket(clientSocket);
-}
-
-int main()
-{
-    WSADATA wsaData{};
-
-    int result = WSAStartup(MAKEWORD(2, 2), &wsaData);
-
-    if (result != 0) {
-        std::cerr << "WSAStartup failed" << std::endl;
+        WinsockSession winsock;
+        ChatServer server(address, port);
+        SetConsoleCtrlHandler(onConsoleSignal, TRUE);
+        std::jthread signalWatcher([&server] {
+            while (!interrupted) std::this_thread::sleep_for(std::chrono::milliseconds(100));
+            server.stop();
+        });
+        server.run();
+        interrupted = true;
+    } catch (const std::exception& error) {
+        interrupted = true;
+        std::cerr << "Fatal error: " << error.what() << '\n';
         return EXIT_FAILURE;
     }
-
-    SOCKET serverSocket = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
-
-    if (serverSocket == INVALID_SOCKET) {
-        std::cerr << "Failed to create server socket" << std::endl;
-        WSACleanup();
-        return EXIT_FAILURE;
-    }
-
-    sockaddr_in serverAddress{};
-    serverAddress.sin_family = AF_INET;
-    serverAddress.sin_addr.s_addr = inet_addr("127.0.0.1");
-    serverAddress.sin_port = htons(54000);
-
-    result = bind(serverSocket, reinterpret_cast<sockaddr*>(&serverAddress), sizeof(serverAddress));
-
-    if (result == SOCKET_ERROR) {
-        std::cerr << "Bind failed" << std::endl;
-        closesocket(serverSocket);
-        WSACleanup();
-        return EXIT_FAILURE;
-    }
-
-    result = listen(serverSocket, SOMAXCONN);
-
-    if (result == SOCKET_ERROR) {
-        std::cerr << "Listen failed" << std::endl;
-        closesocket(serverSocket);
-        WSACleanup();
-        return EXIT_FAILURE;
-    }
-
-    std::cout << "Server is listening on port 54000" << std::endl;
-
-    while (true) {
-        SOCKET clientSocket = accept(serverSocket, nullptr, nullptr);
-        if (clientSocket == INVALID_SOCKET) {
-            std::cerr << "Accept failed" << std::endl;
-            closesocket(serverSocket);
-            WSACleanup();
-            return EXIT_FAILURE;
-        }
-        std::cout << "Attempt to connect" << std::endl;
-
-        std::thread clientThread(handleClient, clientSocket);
-        clientThread.detach();
-    }
-
-    closesocket(serverSocket);
-    WSACleanup();
-    
-
-    return 0;
+    return EXIT_SUCCESS;
 }
