@@ -1,5 +1,9 @@
 # CPPChat
 
+[![Windows CI](https://github.com/Dumr3n/CPPChat/actions/workflows/windows-ci.yml/badge.svg?branch=main)](https://github.com/Dumr3n/CPPChat/actions/workflows/windows-ci.yml)
+![C++20](https://img.shields.io/badge/C%2B%2B-20-blue.svg)
+![Platform](https://img.shields.io/badge/platform-Windows-lightgrey.svg)
+
 A terminal-based, multi-client TCP chat for Windows, written in modern C++.
 
 ## Features
@@ -28,6 +32,10 @@ The first configure downloads the pinned GoogleTest dependency. Run the tests wi
 ```powershell
 ctest --preset debug
 ```
+
+GitHub Actions runs the Debug and Release test suites on `windows-latest` for
+every push and pull request targeting `main`. The badge at the top reflects the
+latest `main` workflow result.
 
 ## Run
 
