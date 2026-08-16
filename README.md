@@ -6,6 +6,9 @@
 
 A terminal-based, multi-client TCP chat for Windows, written in modern C++.
 
+<img width="2559" height="1525" alt="image" src="https://github.com/user-attachments/assets/230674a6-efbe-44b9-ba0d-fed1d497974a" />
+
+
 ## Features
 
 - Length-prefixed binary protocol that handles TCP fragmentation and coalescing
